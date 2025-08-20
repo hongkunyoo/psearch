@@ -60,9 +60,20 @@ class NotesSearchEngine:
                 for doc, score in results_with_scores
             ]
             
+            # Deduplicate by file path, keeping the best score per file
+            seen_files = {}
+            deduplicated_results = []
+            
+            # Sort by score first to ensure we keep the best match per file
             search_results.sort(key=lambda x: x.score)
             
-            return search_results
+            for result in search_results:
+                file_path = str(result.source)
+                if file_path not in seen_files:
+                    seen_files[file_path] = True
+                    deduplicated_results.append(result)
+            
+            return deduplicated_results
             
         except Exception as e:
             console.print(f"[red]Search error: {e}[/red]")
