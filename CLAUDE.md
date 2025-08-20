@@ -86,6 +86,7 @@ The indexer automatically scans for:
 - `.yaml`, `.yml` - YAML files
 - `.sh` - Shell scripts
 - `.sql` - SQL queries
+- Extension-less files that contain readable text content
 
 ## Key Implementation Details
 

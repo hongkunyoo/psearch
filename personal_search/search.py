@@ -1,10 +1,15 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 from datetime import datetime
 import json
+import re
 
 from langchain_chroma import Chroma
 from langchain.schema import Document
+from langchain_huggingface import HuggingFacePipeline
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -35,6 +40,105 @@ class NotesSearchEngine:
         self.index_dir = index_dir or settings.index_directory
         self.indexer = NotesIndexer(index_dir=self.index_dir)
         self.vectorstore = self.indexer.get_vectorstore()
+        
+        # Initialize local LLM for relevance scoring
+        self._init_llm()
+    
+    def _init_llm(self):
+        """Initialize a local LLM for relevance scoring"""
+        try:
+            # Use a small, fast model for relevance scoring
+            # Using FLAN-T5 small model which is good for Q&A and reasoning tasks
+            model_name = "google/flan-t5-small"
+            
+            with console.status("[bold green]Loading LLM model for intelligent search..."):
+                self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+                self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+                
+                # Create a pipeline for text generation
+                self.llm_pipeline = pipeline(
+                    "text2text-generation",
+                    model=self.model,
+                    tokenizer=self.tokenizer,
+                    max_length=50,
+                    device=-1  # Use CPU
+                )
+                
+                self.llm = HuggingFacePipeline(pipeline=self.llm_pipeline)
+                
+                # Create prompt template for relevance scoring
+                self.relevance_prompt = PromptTemplate(
+                    input_variables=["query", "filename", "content_preview"],
+                    template="""Given the search query: "{query}"
+                    
+Is this file relevant? Answer with just 'yes' or 'no'.
+
+File: {filename}
+Content preview: {content_preview}
+
+Answer:"""
+                )
+                
+                self.score_prompt = PromptTemplate(
+                    input_variables=["query", "filename", "content_preview"],
+                    template="""Query: {query}
+File name: {filename}
+Content: {content_preview}
+
+How relevant is this file to the query? Rate 1-10:"""
+                )
+                
+            console.print("[green]✓ LLM model loaded successfully[/green]")
+            self.llm_available = True
+            
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not load LLM model: {e}[/yellow]")
+            console.print("[yellow]Falling back to keyword-based search[/yellow]")
+            self.llm_available = False
+    
+    def _score_with_llm(self, result: SearchResult, query: str) -> float:
+        """Use LLM to score the relevance of a result"""
+        if not self.llm_available:
+            return result.score
+        
+        try:
+            # Prepare content preview (first 300 chars)
+            content_preview = result.content[:300] if len(result.content) > 300 else result.content
+            
+            # Get relevance score from LLM using the new invoke method
+            score_chain = self.score_prompt | self.llm
+            
+            llm_response = score_chain.invoke({
+                "query": query,
+                "filename": result.filename,
+                "content_preview": content_preview
+            }).strip()
+            
+            # Try to extract numeric score
+            try:
+                # Extract first number from response
+                import re
+                numbers = re.findall(r'\d+', llm_response)
+                if numbers:
+                    llm_score = int(numbers[0])
+                    llm_score = max(1, min(10, llm_score))  # Clamp to 1-10
+                else:
+                    llm_score = 5  # Default middle score
+            except:
+                llm_score = 5
+            
+            # Combine with original score (lower is better)
+            # Convert LLM score to distance-like metric
+            llm_distance = (11 - llm_score) / 10.0  # Convert 1-10 to 1.0-0.1
+            
+            # Weight: 70% LLM score, 30% vector similarity
+            combined_score = (llm_distance * 0.7) + (result.score * 0.3)
+            
+            return combined_score
+            
+        except Exception as e:
+            console.print(f"[yellow]LLM scoring error: {e}[/yellow]", markup=True)
+            return result.score
     
     def search(
         self,
@@ -49,31 +153,45 @@ class NotesSearchEngine:
         top_k = top_k or settings.top_k
         
         try:
+            # Get more results initially for better re-ranking
+            initial_k = min(top_k * 2, 20) if self.llm_available else top_k
+            
+            # Search with original query
             results_with_scores = self.vectorstore.similarity_search_with_score(
                 query,
-                k=top_k,
+                k=initial_k,
                 filter=filter_dict
             )
             
-            search_results = [
-                SearchResult(doc, score)
-                for doc, score in results_with_scores
-            ]
-            
-            # Deduplicate by file path, keeping the best score per file
+            # Create SearchResult objects
+            search_results = []
             seen_files = {}
-            deduplicated_results = []
             
-            # Sort by score first to ensure we keep the best match per file
+            for doc, score in results_with_scores:
+                file_path = str(doc.metadata.get('source', 'unknown'))
+                
+                # Skip results from Git directories
+                if '/.git/' in file_path or '/.github/' in file_path:
+                    continue
+                
+                # Deduplicate by file path
+                if file_path not in seen_files:
+                    result = SearchResult(doc, score)
+                    seen_files[file_path] = result
+                    search_results.append(result)
+            
+            # Apply LLM-based scoring if available
+            if self.llm_available and search_results:
+                console.print(f"[cyan]Analyzing {len(search_results)} results with LLM...[/cyan]")
+                
+                for result in search_results:
+                    # Score each result with LLM
+                    result.score = self._score_with_llm(result, query)
+            
+            # Sort by score (lower is better) and return top_k
             search_results.sort(key=lambda x: x.score)
             
-            for result in search_results:
-                file_path = str(result.source)
-                if file_path not in seen_files:
-                    seen_files[file_path] = True
-                    deduplicated_results.append(result)
-            
-            return deduplicated_results
+            return search_results[:top_k]
             
         except Exception as e:
             console.print(f"[red]Search error: {e}[/red]")

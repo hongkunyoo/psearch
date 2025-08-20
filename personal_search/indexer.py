@@ -54,6 +54,57 @@ class NotesIndexer:
         with open(filepath, 'rb') as f:
             return hashlib.md5(f.read()).hexdigest()
     
+    def _should_skip_path(self, filepath: Path) -> bool:
+        """Check if a path should be skipped during indexing"""
+        # Directories to skip
+        skip_dirs = {'.git', '.github', '__pycache__', 'node_modules', '.venv', 'venv', 'env'}
+        
+        # Check if any parent directory should be skipped
+        for parent in filepath.parents:
+            if parent.name in skip_dirs:
+                return True
+        
+        # Check if the file itself is in a skip directory
+        if filepath.parent.name in skip_dirs:
+            return True
+            
+        # Check for .git and .github anywhere in the path
+        path_str = str(filepath)
+        if '/.git/' in path_str or '/.github/' in path_str:
+            return True
+            
+        return False
+    
+    def _is_text_file(self, filepath: Path) -> bool:
+        """Check if a file is likely to be a text file"""
+        try:
+            with open(filepath, 'rb') as f:
+                # Read first 1024 bytes to check for binary content
+                chunk = f.read(1024)
+                if not chunk:
+                    return True  # Empty files are considered text
+                
+                # Check for null bytes (common in binary files)
+                if b'\x00' in chunk:
+                    return False
+                
+                # Try to decode as UTF-8
+                try:
+                    chunk.decode('utf-8')
+                    return True
+                except UnicodeDecodeError:
+                    pass
+                
+                # Try to decode as latin-1 (fallback)
+                try:
+                    chunk.decode('latin-1')
+                    return True
+                except UnicodeDecodeError:
+                    return False
+                    
+        except (OSError, IOError):
+            return False
+
     def _load_documents(self) -> List[Document]:
         documents = []
         extensions = ['.txt', '.md', '.py', '.js', '.json', '.yaml', '.yml', '.sh', '.sql']
@@ -63,8 +114,24 @@ class NotesIndexer:
             return documents
         
         files = []
+        # Add files with known extensions
         for ext in extensions:
-            files.extend(self.notes_dir.rglob(f"*{ext}"))
+            potential_files = self.notes_dir.rglob(f"*{ext}")
+            for filepath in potential_files:
+                if not self._should_skip_path(filepath):
+                    files.append(filepath)
+        
+        # Add extension-less files that appear to be text files
+        all_files = self.notes_dir.rglob("*")
+        for filepath in all_files:
+            if (filepath.is_file() and 
+                not filepath.suffix and 
+                not self._should_skip_path(filepath) and 
+                self._is_text_file(filepath)):
+                files.append(filepath)
+        
+        # Remove duplicates while preserving order
+        files = list(dict.fromkeys(files))
         
         with Progress(
             SpinnerColumn(),
