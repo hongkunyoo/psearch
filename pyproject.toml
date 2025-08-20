@@ -1,11 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "personal-search-engine"
 version = "0.1.0"
 description = "Personal search engine for developer notes and code snippets"
 requires-python = ">=3.9"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+readme = "README.md"
+license = {text = "MIT"}
+dependencies = [
+    "langchain>=0.3.0",
+    "langchain-community>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langchain-chroma>=0.1.0",
+    "langchain-huggingface>=0.1.0",
+    "chromadb>=0.5.0",
+    "sentence-transformers>=3.0.0",
+    "click>=8.1.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+]
 
 [project.scripts]
 psearch = "personal_search.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["personal_search*"]
 
 [tool.ruff]
 line-length = 100

@@ -1,91 +1,152 @@
 # Personal Search Engine
 
-A CLI-based semantic search engine for your personal notes and code snippets.
+A fast, local CLI tool for semantic search through your personal notes and code snippets.
 
 ## Features
 
-- Semantic search using natural language queries
-- Indexes text files, markdown, code files, and more
-- Local embeddings (no API keys required)
-- Fast vector similarity search with ChromaDB
-- Rich terminal output with syntax highlighting
-- Interactive search mode
+- 🔍 **Natural Language Search**: Search using queries like "python async functions" 
+- 🚀 **Fast & Local**: Uses local embeddings - no API keys required
+- 💾 **Persistent Index**: ChromaDB vector database stores embeddings on disk
+- 🎨 **Rich Terminal UI**: Syntax highlighting for code snippets
+- 📝 **Multiple Formats**: Supports `.txt`, `.md`, `.py`, `.js`, `.json`, `.yaml`, and more
 
-## Installation
+## Quick Start
+
+### Installation
 
 ```bash
-# Install uv if not already installed
+# Clone the repository
+git clone <repo-url>
+cd personal-search-engine
+
+# Install uv if not present
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Create virtual environment
-uv venv
-
-# Install dependencies
-uv pip install -r requirements.txt
+# Install psearch in editable mode
+uv pip install -e .
 ```
 
-## Usage
-
-### 1. Index your notes
+### Basic Usage
 
 ```bash
-# Index default notes directory (~/notes)
-uv run python -m personal_search index
+# First time: Index your notes
+psearch index
 
-# Index a specific directory
-uv run python -m personal_search index --path /path/to/your/notes
+# Search your notes
+psearch "python async await"
+psearch "docker compose"
+psearch "git rebase"
 
-# Force reindex all files
-uv run python -m personal_search index --force
-```
-
-### 2. Search your notes
-
-```bash
-# Search with a query
-uv run python -m personal_search search "python async functions"
-
-# Get more results
-uv run python -m personal_search search "docker compose" --top-k 10
+# More results
+psearch "kubernetes" -k 10
 
 # Show full content
-uv run python -m personal_search search "kubernetes deployment" --verbose
+psearch "terraform" --verbose
 ```
 
-### 3. Interactive mode
+## Commands
 
+### Search (default)
 ```bash
-# Start interactive search
-uv run python -m personal_search interactive
+psearch "your search query"        # Direct search
+psearch search "your query"        # Explicit search command
+psearch "query" -k 10              # Get top 10 results
+psearch "query" --verbose          # Show full content
 ```
 
-### Other commands
-
+### Index
 ```bash
-# Show configuration
-uv run python -m personal_search info
+psearch index                      # Index default notes directory
+psearch index --path ~/my-notes   # Index custom directory
+psearch index --force             # Force reindex all files
+```
 
-# Clear the index
-uv run python -m personal_search clear
+### Interactive Mode
+```bash
+psearch interactive               # Enter interactive search mode
+```
+
+### Other Commands
+```bash
+psearch info                      # Show configuration
+psearch clear                     # Clear the index
+psearch clear --yes              # Clear without confirmation
+psearch --version                # Show version
+psearch --help                   # Show help
 ```
 
 ## Configuration
 
-Copy `.env.example` to `.env` and customize settings:
+Create a `.env` file to customize settings:
 
-- `NOTES_DIRECTORY`: Directory containing your notes
-- `INDEX_DIRECTORY`: Where to store the search index
-- `EMBEDDING_MODEL`: Which embedding model to use
-- `TOP_K`: Default number of search results
+```bash
+# Copy example config
+cp .env.example .env
+```
+
+Available settings:
+- `NOTES_DIRECTORY`: Where your notes are stored (default: `~/notes`)
+- `INDEX_DIRECTORY`: Where to store the search index (default: `~/.personal_search/index`)
+- `EMBEDDING_MODEL`: Which model to use for embeddings
+- `TOP_K`: Default number of results (default: 5)
+- `CHUNK_SIZE`: Size of text chunks for indexing (default: 1000)
+
+## Examples
+
+### Quick Search Workflow
+```bash
+# Index your notes (one time)
+psearch index
+
+# Search for async Python code
+psearch "async await python"
+
+# Search for Docker commands
+psearch "docker build push"
+
+# Search for git workflows
+psearch "git cherry pick"
+```
+
+### Interactive Mode
+```bash
+psearch interactive
+# Then type queries interactively
+# Type 'quit' to exit
+```
 
 ## Supported File Types
 
-- Text files (`.txt`)
-- Markdown (`.md`)
-- Python (`.py`)
-- JavaScript (`.js`)
-- JSON (`.json`)
-- YAML (`.yaml`, `.yml`)
-- Shell scripts (`.sh`)
-- SQL (`.sql`)
-- And more...
+- `.txt` - Plain text files
+- `.md` - Markdown documentation
+- `.py` - Python scripts
+- `.js` - JavaScript files
+- `.json` - JSON configuration
+- `.yaml`, `.yml` - YAML files
+- `.sh` - Shell scripts
+- `.sql` - SQL queries
+
+## How It Works
+
+1. **Indexing**: Scans your notes directory and creates vector embeddings using Sentence Transformers
+2. **Storage**: Stores embeddings in ChromaDB (persisted at `~/.personal_search/index`)
+3. **Search**: Converts your query to embeddings and finds similar documents using cosine similarity
+4. **Display**: Shows results with syntax highlighting and relevance scores
+
+## Development
+
+```bash
+# Install dev dependencies
+uv pip install -r requirements.txt
+
+# Run directly without installation
+uv run python -m personal_search "query"
+
+# Format code
+uv run black personal_search/
+uv run ruff check personal_search/
+```
+
+## License
+
+MIT

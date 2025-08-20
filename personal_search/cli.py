@@ -1,4 +1,5 @@
 import click
+import sys
 from pathlib import Path
 from typing import Optional
 from rich.console import Console
@@ -11,27 +12,114 @@ from .search import NotesSearchEngine
 console = Console()
 
 
-@click.group()
-@click.version_option(version='0.1.0')
-def main():
-    """Personal Search Engine - Search through your notes and code snippets"""
-    pass
+@click.command()
+@click.argument('command', nargs=1, required=False)
+@click.argument('query', nargs=-1)
+@click.option('--path', '-p', type=click.Path(exists=True, path_type=Path), 
+              help='Path to notes directory to index')
+@click.option('--force', '-f', is_flag=True, 
+              help='Force reindex all files (ignore existing index)')
+@click.option('--top-k', '-k', type=int, metavar='N',
+              help='Number of search results to return (default: 5)')
+@click.option('--verbose', '-v', is_flag=True, 
+              help='Show full content of matched files')
+@click.option('--files-only', '-l', is_flag=True, 
+              help='Show only file paths and scores, no content')
+@click.option('--json', '-j', is_flag=True, 
+              help='Output search results in JSON format')
+@click.option('--yes', '-y', is_flag=True, 
+              help='Skip confirmation prompts')
+@click.option('--version', is_flag=True, 
+              help='Show version information')
+def main(command, query, path, force, top_k, verbose, files_only, json, yes, version):
+    """Personal Search Engine - Search through your notes and code snippets
+    
+    \b
+    USAGE:
+        psearch "your search query"        # Search notes
+        psearch search "your query"        # Search notes (explicit)
+        psearch index                      # Index notes directory
+        psearch index --path ~/notes       # Index specific directory
+        psearch interactive                # Interactive search mode
+        psearch info                       # Show configuration
+        psearch clear                      # Clear the index
+        psearch --version                  # Show version
+    
+    \b
+    EXAMPLES:
+        psearch "python async functions"
+        psearch "docker compose" -k 10
+        psearch index --force
+        psearch clear --yes
+    
+    \b
+    OUTPUT OPTIONS:
+        -v, --verbose     Show full content of matched files
+        -l, --files-only  Show only file paths and scores
+        -j, --json        Output results in JSON format
+    """
+    
+    if version:
+        console.print("psearch version 0.1.0")
+        return
+    
+    # If no command given but query exists, treat as search
+    if not command and not query:
+        click.echo(click.get_current_context().get_help())
+        return
+    
+    # If command looks like a search query (no recognized command)
+    if command and command not in ['index', 'search', 'interactive', 'info', 'clear']:
+        # Treat the command as part of the search query
+        full_query = ' '.join([command] + list(query))
+        do_search(full_query, top_k, verbose, files_only, json)
+        return
+    
+    # Handle explicit commands
+    if command == 'search':
+        if not query:
+            console.print("[red]Please provide a search query[/red]")
+            return
+        full_query = ' '.join(query)
+        do_search(full_query, top_k, verbose, files_only, json)
+    
+    elif command == 'index':
+        do_index(path, force)
+    
+    elif command == 'interactive':
+        do_interactive()
+    
+    elif command == 'info':
+        do_info()
+    
+    elif command == 'clear':
+        do_clear(yes)
+    
+    else:
+        # Default to search if query provided
+        if query:
+            full_query = ' '.join(query)
+            do_search(full_query, top_k, verbose, files_only, json)
 
 
-@main.command()
-@click.option(
-    '--path', '-p',
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help='Path to notes directory'
-)
-@click.option(
-    '--force', '-f',
-    is_flag=True,
-    help='Force reindex all files'
-)
-def index(path: Optional[Path], force: bool):
-    """Index notes from specified directory"""
+def do_search(query_str: str, top_k: Optional[int] = None, verbose: bool = False, files_only: bool = False, json_output: bool = False):
+    """Execute search"""
+    if not query_str.strip():
+        console.print("[red]Please provide a search query[/red]")
+        return
+    
+    search_engine = NotesSearchEngine()
+    
+    if not search_engine.vectorstore:
+        console.print("[red]No index found. Please run 'psearch index' first.[/red]")
+        return
+    
+    results = search_engine.search(query_str, top_k=top_k)
+    search_engine.display_results(results, query_str, verbose=verbose, files_only=files_only, json_output=json_output)
+
+
+def do_index(path: Optional[Path] = None, force: bool = False):
+    """Index notes directory"""
     notes_dir = path or settings.notes_directory
     
     console.print(f"[bold]Personal Search Engine - Indexer[/bold]")
@@ -53,39 +141,7 @@ def index(path: Optional[Path], force: bool):
         console.print(f"[bold green]✓ Indexing complete![/bold green]")
 
 
-@main.command()
-@click.argument('query', nargs=-1, required=True)
-@click.option(
-    '--top-k', '-k',
-    type=int,
-    default=None,
-    help='Number of results to return'
-)
-@click.option(
-    '--verbose', '-v',
-    is_flag=True,
-    help='Show full content of results'
-)
-def search(query: tuple, top_k: Optional[int], verbose: bool):
-    """Search through indexed notes"""
-    query_str = ' '.join(query)
-    
-    if not query_str.strip():
-        console.print("[red]Please provide a search query[/red]")
-        return
-    
-    search_engine = NotesSearchEngine()
-    
-    if not search_engine.vectorstore:
-        console.print("[red]No index found. Please run 'psearch index' first.[/red]")
-        return
-    
-    results = search_engine.search(query_str, top_k=top_k)
-    search_engine.display_results(results, query_str, verbose=verbose)
-
-
-@main.command()
-def interactive():
+def do_interactive():
     """Interactive search mode"""
     console.print("[bold]Personal Search Engine - Interactive Mode[/bold]")
     console.print("Type 'quit' or 'exit' to leave\n")
@@ -117,8 +173,7 @@ def interactive():
             console.print(f"[red]Error: {e}[/red]")
 
 
-@main.command()
-def info():
+def do_info():
     """Show configuration information"""
     console.print("[bold]Personal Search Engine - Configuration[/bold]\n")
     
@@ -148,13 +203,7 @@ def info():
         console.print(f"[dim]Index exists: ✗[/dim]")
 
 
-@main.command()
-@click.option(
-    '--yes', '-y',
-    is_flag=True,
-    help='Skip confirmation'
-)
-def clear(yes: bool):
+def do_clear(yes: bool = False):
     """Clear the search index"""
     if not yes:
         if not Confirm.ask(f"Clear index at {settings.index_directory}?"):

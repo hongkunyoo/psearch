@@ -1,8 +1,9 @@
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from datetime import datetime
+import json
 
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain.schema import Document
 from rich.console import Console
 from rich.table import Table
@@ -67,18 +68,58 @@ class NotesSearchEngine:
             console.print(f"[red]Search error: {e}[/red]")
             return []
     
-    def display_results(self, results: List[SearchResult], query: str, verbose: bool = False):
+    def display_results(self, results: List[SearchResult], query: str, verbose: bool = False, files_only: bool = False, json_output: bool = False):
         if not results:
-            console.print("[yellow]No results found.[/yellow]")
+            if json_output:
+                print(json.dumps({"query": query, "results": []}))
+            else:
+                console.print("[yellow]No results found.[/yellow]")
             return
         
+        if json_output:
+            self._display_json_results(results, query, verbose)
+        elif files_only:
+            self._display_files_only(results, query)
+        else:
+            console.print(f"\n[bold blue]Found {len(results)} results for: '{query}'[/bold blue]\n")
+            
+            for i, result in enumerate(results, 1):
+                self._display_single_result(result, i, verbose)
+    
+    def _display_files_only(self, results: List[SearchResult], query: str):
+        """Display only file paths and scores, not content"""
         console.print(f"\n[bold blue]Found {len(results)} results for: '{query}'[/bold blue]\n")
         
         for i, result in enumerate(results, 1):
-            self._display_single_result(result, i, verbose)
+            score_str = f"[dim](Score: {result.score:.3f})[/dim]"
+            console.print(f"[bold cyan]{i:2}.[/bold cyan] {result.source} {score_str}")
+    
+    def _display_json_results(self, results: List[SearchResult], query: str, verbose: bool = False):
+        """Display results in JSON format"""
+        json_results = []
+        
+        for result in results:
+            result_data = {
+                "filename": result.filename,
+                "path": str(result.source),
+                "score": round(result.score, 3),
+                "modified": result.modified,
+                "content": result.content if verbose else (result.content[:500] + "..." if len(result.content) > 500 else result.content)
+            }
+            json_results.append(result_data)
+        
+        output = {
+            "query": query,
+            "total_results": len(results),
+            "results": json_results
+        }
+        
+        print(json.dumps(output, indent=2, ensure_ascii=False))
     
     def _display_single_result(self, result: SearchResult, index: int, verbose: bool = False):
-        title = f"[{index}] {result.filename} (Score: {result.score:.3f})"
+        # Escape brackets in filename to prevent Rich markup parsing issues
+        escaped_filename = result.filename.replace('[', r'\[').replace(']', r'\]')
+        title = f"[{index}] {escaped_filename} (Score: {result.score:.3f})"
         
         content_preview = result.content[:500] + "..." if len(result.content) > 500 else result.content
         
@@ -94,9 +135,13 @@ class NotesSearchEngine:
             syntax = Syntax(content_to_show, lexer, theme="monokai", line_numbers=True)
             panel_content = syntax
         else:
-            panel_content = content_to_show
+            # Escape Rich markup in plain text content to prevent parsing errors
+            from rich.text import Text
+            panel_content = Text(content_to_show)
         
-        metadata_str = f"[dim]Path: {result.source}\nModified: {result.modified}[/dim]"
+        # Escape brackets in path to prevent Rich markup parsing issues
+        escaped_path = str(result.source).replace('[', r'\[').replace(']', r'\]')
+        metadata_str = f"[dim]Path: {escaped_path}\nModified: {result.modified}[/dim]"
         
         panel = Panel(
             panel_content,
