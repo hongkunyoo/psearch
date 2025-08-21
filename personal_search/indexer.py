@@ -146,6 +146,11 @@ class NotesIndexer:
                     file_docs = loader.load()
                     
                     for doc in file_docs:
+                        # Include filename in the content for better search relevance
+                        # Format: "Filename: <name>\n<original content>"
+                        filename_header = f"Filename: {filepath.name}\nPath: {filepath.parent.name}/{filepath.name}\n\n"
+                        doc.page_content = filename_header + doc.page_content
+                        
                         doc.metadata.update({
                             'source': str(filepath),
                             'filename': filepath.name,

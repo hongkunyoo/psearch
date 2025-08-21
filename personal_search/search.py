@@ -25,7 +25,20 @@ class SearchResult:
     def __init__(self, document: Document, score: float):
         self.document = document
         self.score = score
-        self.content = document.page_content
+        
+        # Strip the filename header from content for display
+        # (it was added for embedding but shouldn't be shown)
+        content = document.page_content
+        if content.startswith("Filename: "):
+            # Remove the filename header lines
+            lines = content.split('\n', 3)
+            if len(lines) > 3:
+                self.content = lines[3]  # Skip "Filename:", "Path:", and empty line
+            else:
+                self.content = content
+        else:
+            self.content = content
+            
         self.metadata = document.metadata
         self.source = Path(document.metadata.get('source', 'unknown'))
         self.filename = document.metadata.get('filename', 'unknown')
